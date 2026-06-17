@@ -156,6 +156,20 @@
 </div>
 
 <script>
+// Focusing any element normally tells the browser to scroll it fully into
+// view, and because this whole widget lives inside an iframe, that scroll
+// can reach up into the host page itself. The previous fix stopped the
+// browser's own default click-to-focus behavior, but it turns out Mapbox
+// also explicitly focuses a popup's close button when it opens (a
+// deliberate accessibility feature, so keyboard users can dismiss it) --
+// that's a direct .focus() call from their code, not a side effect of a
+// click, so it wasn't covered. Patching focus() itself to always skip the
+// scroll catches that case and any other source, ours or theirs.
+const nativeFocus = HTMLElement.prototype.focus;
+HTMLElement.prototype.focus = function (options) {
+  nativeFocus.call(this, Object.assign({}, options, { preventScroll: true }));
+};
+
 mapboxgl.accessToken = 'pk.eyJ1IjoibGh1ZmZtYW5jYnJlIiwiYSI6ImNtcWhodWtyaDBiNmQycW9lYm9kdXA2bmoifQ.NBRc7lfVqEdO-xctcftsVA';
 
 const map = new mapboxgl.Map({
