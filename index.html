@@ -172,6 +172,18 @@ const map = new mapboxgl.Map({
 // of the page jumping when clicking around in the embedded widget.
 map.getCanvas().removeAttribute('tabindex');
 
+// The canvas tabindex above only covers focus grabbed by the map itself.
+// Several other things in this widget -- the popup's close button, the
+// "Visit website" link, the category buttons -- can also receive keyboard
+// focus on click depending on the browser, and any one of them doing so
+// is enough to retrigger the same host-page scroll. Rather than chase
+// down each element, suppress the browser's default focus-on-mousedown
+// behavior for the whole widget. Clicks, map panning, and link navigation
+// all run off separate events (click/mouseup) and are unaffected.
+document.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+});
+
 // ---------------------------------------------------------------------
 // Embedded data (kept inline so this file has zero external dependencies
 // besides the Mapbox library itself — drop the geojson/icons in as real
