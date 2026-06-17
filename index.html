@@ -162,8 +162,15 @@ const map = new mapboxgl.Map({
   container: 'map',
   style: 'mapbox://styles/lhuffmancbre/cmqgxny5r001j01r37ioab3v7',
   center: [-122.3465, 47.62025],
-  zoom: 14.23
+  zoom: 13.6
 });
+
+// Mapbox gives its canvas a tabindex by default so keyboard users can pan
+// with arrow keys. We don't need that here, and a focused element inside
+// an iframe is exactly the kind of thing that makes some browsers
+// auto-scroll the host page to bring it into view -- which is the cause
+// of the page jumping when clicking around in the embedded widget.
+map.getCanvas().removeAttribute('tabindex');
 
 // ---------------------------------------------------------------------
 // Embedded data (kept inline so this file has zero external dependencies
@@ -182,7 +189,7 @@ const ICONS = {
 };
 
 const TYPES = ['Hotels', 'Cafe', 'Restaurants', 'Attractions'];
-const DEFAULT_VIEW = { center: [-122.3465, 47.62025], zoom: 14.23 };
+const DEFAULT_VIEW = { center: [-122.3465, 47.62025], zoom: 13.6 };
 
 function loadIcon(id, src, width, height) {
   return new Promise((resolve, reject) => {
@@ -329,12 +336,15 @@ map.on('load', async () => {
   function flyToFeature(f) {
     // Fit both the selected place AND the 2201 Westlake marker in view,
     // rather than just centering on the place and potentially pushing the
-    // property off-screen. Left padding accounts for the list panel.
+    // property off-screen. Left padding needs to clear not just the list
+    // panel itself, but also the popup that opens on the marker (it's
+    // ~240px wide and centered on the point), or the popup's left side
+    // ends up rendered underneath the panel.
     const bounds = new mapboxgl.LngLatBounds();
     bounds.extend(markerCoords);
     bounds.extend(f.geometry.coordinates);
     map.fitBounds(bounds, {
-      padding: { top: 70, bottom: 60, left: 260, right: 60 },
+      padding: { top: 70, bottom: 60, left: 410, right: 60 },
       maxZoom: 17
     });
 
