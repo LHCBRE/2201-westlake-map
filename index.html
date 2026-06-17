@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>2201 Westlake — Neighborhood Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.1/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.9.1/mapbox-gl.js"></script>
+<style>
+  :root {
+    --hotels: #5dbb57;
+    --hotels-soft: #e6f3e4;
+    --cafe: #ed8430;
+    --cafe-soft: #fce6d4;
+    --restaurants: #f5c01a;
+    --restaurants-soft: #fdf0c6;
+    --attractions: #165ca7;
+    --attractions-soft: #dde8f3;
+    --ink: #232323;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+
+  #map-controls {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    max-width: calc(100% - 28px);
+    z-index: 1;
+  }
+  #map-controls button {
+    border: none;
+    border-radius: 18px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  button#Hotels { background: var(--hotels-soft); color: var(--hotels); }
+  button#Hotels.active { background: var(--hotels); color: #fff; }
+  button#Cafe { background: var(--cafe-soft); color: var(--cafe); }
+  button#Cafe.active { background: var(--cafe); color: #fff; }
+  button#Restaurants { background: var(--restaurants-soft); color: #8a6700; }
+  button#Restaurants.active { background: var(--restaurants); color: #3a2c00; }
+  button#Attractions { background: var(--attractions-soft); color: var(--attractions); }
+  button#Attractions.active { background: var(--attractions); color: #fff; }
+  button#showAll {
+    background: #ececeb;
+    color: #4a4a48;
+  }
+  button#showAll:hover { background: #e1e1df; }
+
+  #poi-list-panel {
+    position: absolute;
+    top: 60px;
+    left: 14px;
+    bottom: 14px;
+    width: 230px;
+    max-width: calc(100% - 28px);
+    background: rgba(255,255,255,0.97);
+    border-radius: 12px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.2);
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 1;
+  }
+  #poi-list-panel.open { display: flex; }
+  .poi-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .poi-list-header button {
+    border: none;
+    background: none;
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    color: inherit;
+    opacity: 0.65;
+    padding: 0 2px;
+  }
+  .poi-list-header button:hover { opacity: 1; }
+  #poi-list-items {
+    list-style: none;
+    margin: 0;
+    padding: 6px 0;
+    overflow-y: auto;
+    flex: 1;
+  }
+  #poi-list-items li {
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+    border-bottom: 1px solid #f4f4f3;
+  }
+  #poi-list-items li:hover { background: #f7f7f6; }
+  #poi-list-items li.selected {
+    background: #eef4fb;
+    font-weight: 600;
+  }
+
+  .poi-popup .mapboxgl-popup-content {
+    padding: 9px 13px;
+    border-radius: 9px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+  }
+  .poi-popup-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--ink);
+    margin: 0;
+    line-height: 1.3;
+  }
+  .poi-popup-link {
+    display: inline-block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #1a6fd6;
+    text-decoration: none;
+  }
+  .poi-popup-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="map-controls">
+  <button id="Hotels" class="active">Hotels</button>
+  <button id="Cafe" class="active">Cafe</button>
+  <button id="Restaurants" class="active">Restaurants</button>
+  <button id="Attractions" class="active">Attractions</button>
+  <button id="showAll">Show All</button>
+</div>
+
+<div id="poi-list-panel">
+  <div class="poi-list-header" id="poi-list-header">
+    <span id="poi-list-title"></span>
+    <button id="poi-list-close" aria-label="Close list">&times;</button>
+  </div>
+  <ul id="poi-list-items"></ul>
+</div>
+
+<script>
+mapboxgl.accessToken = 'pk.eyJ1IjoibGh1ZmZtYW5jYnJlIiwiYSI6ImNtcWhodWtyaDBiNmQycW9lYm9kdXA2bmoifQ.NBRc7lfVqEdO-xctcftsVA';
+
+const map = new mapboxgl.Map({
+  container: 'map',
+  style: 'mapbox://styles/lhuffmancbre/cmqgxny5r001j01r37ioab3v7',
+  center: [-122.3465, 47.62025],
+  zoom: 14.23
+});
+
+// ---------------------------------------------------------------------
+// Embedded data (kept inline so this file has zero external dependencies
+// besides the Mapbox library itself — drop the geojson/icons in as real
+// files later if you'd rather manage them separately in the repo)
+// ---------------------------------------------------------------------
+const amenitiesGeoJSON = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"Name": "Gage Academy of Arts", "Type": "Attractions", "Link": "https://gageacademy.org/"}, "geometry": {"type": "Point", "coordinates": [-122.341421, 47.61773]}, "bbox": [-122.341421, 47.61773, -122.341421, 47.61773]}, {"type": "Feature", "properties": {"Name": "Whole Foods", "Type": "Restaurants", "Link": "https://www.wholefoodsmarket.com/"}, "geometry": {"type": "Point", "coordinates": [-122.33813, 47.618323]}, "bbox": [-122.33813, 47.618323, -122.33813, 47.618323]}, {"type": "Feature", "properties": {"Name": "Einstein Bros. Bagels", "Type": "Cafe", "Link": "https://www.einsteinbros.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338863, 47.617963]}, "bbox": [-122.338863, 47.617963, -122.338863, 47.617963]}, {"type": "Feature", "properties": {"Name": "Kakao", "Type": "Cafe", "Link": "https://www.kakaoseattle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338829, 47.621453]}, "bbox": [-122.338829, 47.621453, -122.338829, 47.621453]}, {"type": "Feature", "properties": {"Name": "Vinason Pho Kitchen", "Type": "Restaurants", "Link": "https://www.vinason.net/"}, "geometry": {"type": "Point", "coordinates": [-122.338057, 47.617562]}, "bbox": [-122.338057, 47.617562, -122.338057, 47.617562]}, {"type": "Feature", "properties": {"Name": "The Spheres (Amazon)", "Type": "Attractions", "Link": "https://www.seattlespheres.com/"}, "geometry": {"type": "Point", "coordinates": [-122.339519, 47.615675]}, "bbox": [-122.339519, 47.615675, -122.339519, 47.615675]}, {"type": "Feature", "properties": {"Name": "citizenM", "Type": "Hotels", "Link": "https://www.citizenm.com/hotels/america/seattle/south-lake-union-hotel"}, "geometry": {"type": "Point", "coordinates": [-122.338898, 47.619986]}, "bbox": [-122.338898, 47.619986, -122.338898, 47.619986]}, {"type": "Feature", "properties": {"Name": "Level Seattle", "Type": "Hotels", "Link": "https://stayinglevel.com/destinations/seattle/"}, "geometry": {"type": "Point", "coordinates": [-122.335169, 47.618903]}, "bbox": [-122.335169, 47.618903, -122.335169, 47.618903]}, {"type": "Feature", "properties": {"Name": "1 Hotel Seattle", "Type": "Hotels", "Link": "https://www.1hotels.com/seattle"}, "geometry": {"type": "Point", "coordinates": [-122.337545, 47.618305]}, "bbox": [-122.337545, 47.618305, -122.337545, 47.618305]}, {"type": "Feature", "properties": {"Name": "The Westin", "Type": "Hotels", "Link": "https://www.marriott.com/en-us/hotels/seawi-the-westin-seattle/overview/"}, "geometry": {"type": "Point", "coordinates": [-122.338209, 47.613726]}, "bbox": [-122.338209, 47.613726, -122.338209, 47.613726]}, {"type": "Feature", "properties": {"Name": "Astra Hotel Seattle", "Type": "Hotels", "Link": "https://astrahotelseattle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.336819, 47.62109]}, "bbox": [-122.336819, 47.62109, -122.336819, 47.62109]}, {"type": "Feature", "properties": {"Name": "Hotel Max", "Type": "Hotels", "Link": "https://www.hotelmaxseattle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.336612, 47.614223]}, "bbox": [-122.336612, 47.614223, -122.336612, 47.614223]}, {"type": "Feature", "properties": {"Name": "Hyatt Regency Seattle", "Type": "Hotels", "Link": "https://www.hyatt.com/hyatt-regency/en-US/sears-hyatt-regency-seattle"}, "geometry": {"type": "Point", "coordinates": [-122.334516, 47.614764]}, "bbox": [-122.334516, 47.614764, -122.334516, 47.614764]}, {"type": "Feature", "properties": {"Name": "Hotel 5", "Type": "Hotels", "Link": "https://www.staypineapple.com/hotel-five-seattle-wa"}, "geometry": {"type": "Point", "coordinates": [-122.341902, 47.615608]}, "bbox": [-122.341902, 47.615608, -122.341902, 47.615608]}, {"type": "Feature", "properties": {"Name": "Holiday Inn Express & Suites", "Type": "Hotels", "Link": "https://www.ihg.com/holidayinnexpress/hotels/us/en/seattle/seasc/hoteldetail"}, "geometry": {"type": "Point", "coordinates": [-122.34288, 47.620336]}, "bbox": [-122.34288, 47.620336, -122.34288, 47.620336]}, {"type": "Feature", "properties": {"Name": "Hyatt Place Seattle", "Type": "Hotels", "Link": "https://www.hyatt.com/hyatt-place/en-US/seazd-hyatt-place-seattle-downtown"}, "geometry": {"type": "Point", "coordinates": [-122.344621, 47.618809]}, "bbox": [-122.344621, 47.618809, -122.344621, 47.618809]}, {"type": "Feature", "properties": {"Name": "Courtyard by Marriott", "Type": "Hotels", "Link": "https://www.marriott.com/en-us/hotels/seacd-courtyard-seattle-downtown-lake-union/overview/"}, "geometry": {"type": "Point", "coordinates": [-122.340596, 47.627402]}, "bbox": [-122.340596, 47.627402, -122.340596, 47.627402]}, {"type": "Feature", "properties": {"Name": "Residence Inn by Marriott", "Type": "Hotels", "Link": "https://www.marriott.com/en-us/hotels/sealu-residence-inn-seattle-downtown-lake-union/overview/"}, "geometry": {"type": "Point", "coordinates": [-122.333147, 47.626297]}, "bbox": [-122.333147, 47.626297, -122.333147, 47.626297]}, {"type": "Feature", "properties": {"Name": "MOXY Seattle Downtown", "Type": "Hotels", "Link": "https://www.marriott.com/en-us/hotels/seaox-moxy-seattle-downtown/overview/"}, "geometry": {"type": "Point", "coordinates": [-122.336239, 47.623362]}, "bbox": [-122.336239, 47.623362, -122.336239, 47.623362]}, {"type": "Feature", "properties": {"Name": "EVEN Hotel Seattle", "Type": "Hotels", "Link": "https://www.ihg.com/evenhotels/hotels/us/en/seattle/seasw/hoteldetail"}, "geometry": {"type": "Point", "coordinates": [-122.334857, 47.624081]}, "bbox": [-122.334857, 47.624081, -122.334857, 47.624081]}, {"type": "Feature", "properties": {"Name": "Staybridge Suites Seattle", "Type": "Hotels", "Link": "https://www.ihg.com/staybridge/hotels/us/en/seattle/seamf/hoteldetail"}, "geometry": {"type": "Point", "coordinates": [-122.334924, 47.624326]}, "bbox": [-122.334924, 47.624326, -122.334924, 47.624326]}, {"type": "Feature", "properties": {"Name": "Four Points by Sheraton", "Type": "Hotels", "Link": "https://www.marriott.com/en-us/hotels/seafp-four-points-downtown-seattle-center/overview/"}, "geometry": {"type": "Point", "coordinates": [-122.344579, 47.624957]}, "bbox": [-122.344579, 47.624957, -122.344579, 47.624957]}, {"type": "Feature", "properties": {"Name": "The Butcher's Table", "Type": "Restaurants", "Link": "https://thebutcherstable.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338645, 47.61746]}, "bbox": [-122.338645, 47.61746, -122.338645, 47.61746]}, {"type": "Feature", "properties": {"Name": "Mendocino Farms", "Type": "Restaurants", "Link": "https://www.mendocinofarms.com/"}, "geometry": {"type": "Point", "coordinates": [-122.337707, 47.617193]}, "bbox": [-122.337707, 47.617193, -122.337707, 47.617193]}, {"type": "Feature", "properties": {"Name": "Petra Mediterranean Bistro", "Type": "Restaurants", "Link": "https://www.petrabistro.com/"}, "geometry": {"type": "Point", "coordinates": [-122.337366, 47.614699]}, "bbox": [-122.337366, 47.614699, -122.337366, 47.614699]}, {"type": "Feature", "properties": {"Name": "Wild Ginger McKenzie", "Type": "Restaurants", "Link": "https://www.wildginger.net/seattlemckenzie"}, "geometry": {"type": "Point", "coordinates": [-122.339319, 47.617634]}, "bbox": [-122.339319, 47.617634, -122.339319, 47.617634]}, {"type": "Feature", "properties": {"Name": "Tutta Bella Pizzeria", "Type": "Restaurants", "Link": "https://www.tuttabella.com/"}, "geometry": {"type": "Point", "coordinates": [-122.333904, 47.61827]}, "bbox": [-122.333904, 47.61827, -122.333904, 47.61827]}, {"type": "Feature", "properties": {"Name": "Shake Shack", "Type": "Restaurants", "Link": "https://www.shakeshack.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338486, 47.617085]}, "bbox": [-122.338486, 47.617085, -122.338486, 47.617085]}, {"type": "Feature", "properties": {"Name": "Joe & the Juice", "Type": "Restaurants", "Link": "https://www.joejuice.com/"}, "geometry": {"type": "Point", "coordinates": [-122.339076, 47.616545]}, "bbox": [-122.339076, 47.616545, -122.339076, 47.616545]}, {"type": "Feature", "properties": {"Name": "Casco Antiguo SLU", "Type": "Restaurants", "Link": "https://www.cascoantiguorestaurants.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338477, 47.61626]}, "bbox": [-122.338477, 47.61626, -122.338477, 47.61626]}, {"type": "Feature", "properties": {"Name": "Ma'ono Fried Chicken", "Type": "Restaurants", "Link": "https://www.maonoseattle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338995, 47.616196]}, "bbox": [-122.338995, 47.616196, -122.338995, 47.616196]}, {"type": "Feature", "properties": {"Name": "Great State Burger", "Type": "Restaurants", "Link": "https://www.greatstateburger.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338696, 47.615464]}, "bbox": [-122.338696, 47.615464, -122.338696, 47.615464]}, {"type": "Feature", "properties": {"Name": "Potbelly Sandwich Shop", "Type": "Restaurants", "Link": "https://www.potbelly.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338667, 47.614901]}, "bbox": [-122.338667, 47.614901, -122.338667, 47.614901]}, {"type": "Feature", "properties": {"Name": "Metropolitan Deli & Cafe", "Type": "Restaurants", "Link": "https://metrodelirepublic.com/"}, "geometry": {"type": "Point", "coordinates": [-122.331365, 47.622937]}, "bbox": [-122.331365, 47.622937, -122.331365, 47.622937]}, {"type": "Feature", "properties": {"Name": "Urban Sushi Kitchen", "Type": "Restaurants", "Link": "http://www.urbansushikitchen.com/"}, "geometry": {"type": "Point", "coordinates": [-122.337239, 47.615863]}, "bbox": [-122.337239, 47.615863, -122.337239, 47.615863]}, {"type": "Feature", "properties": {"Name": "Barolo Ristorante", "Type": "Restaurants", "Link": "https://baroloseattle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.337225, 47.61442]}, "bbox": [-122.337225, 47.61442, -122.337225, 47.61442]}, {"type": "Feature", "properties": {"Name": "Cinque Terre Ristorante", "Type": "Restaurants", "Link": "https://www.cinqueterreseattle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338118, 47.61509]}, "bbox": [-122.338118, 47.61509, -122.338118, 47.61509]}, {"type": "Feature", "properties": {"Name": "Marination", "Type": "Restaurants", "Link": "https://marinationmobile.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338268, 47.614707]}, "bbox": [-122.338268, 47.614707, -122.338268, 47.614707]}, {"type": "Feature", "properties": {"Name": "Poke Alice 2", "Type": "Restaurants", "Link": "https://www.pokealice2.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338882, 47.614368]}, "bbox": [-122.338882, 47.614368, -122.338882, 47.614368]}, {"type": "Feature", "properties": {"Name": "Evergreens Salad", "Type": "Restaurants", "Link": "https://evergreens.com/"}, "geometry": {"type": "Point", "coordinates": [-122.339128, 47.615265]}, "bbox": [-122.339128, 47.615265, -122.339128, 47.615265]}, {"type": "Feature", "properties": {"Name": "Willmott's Ghost", "Type": "Restaurants", "Link": "https://willmottsghost.com/"}, "geometry": {"type": "Point", "coordinates": [-122.339636, 47.61544]}, "bbox": [-122.339636, 47.61544, -122.339636, 47.61544]}, {"type": "Feature", "properties": {"Name": "2120", "Type": "Restaurants", "Link": "https://www.2120restaurant.com/"}, "geometry": {"type": "Point", "coordinates": [-122.340314, 47.615788]}, "bbox": [-122.340314, 47.615788, -122.340314, 47.615788]}, {"type": "Feature", "properties": {"Name": "Lady Yum", "Type": "Restaurants", "Link": "https://ladyyum.com/"}, "geometry": {"type": "Point", "coordinates": [-122.340541, 47.615984]}, "bbox": [-122.340541, 47.615984, -122.340541, 47.615984]}, {"type": "Feature", "properties": {"Name": "Top Pot Doughnuts", "Type": "Restaurants", "Link": "https://www.toppotdoughnuts.com/"}, "geometry": {"type": "Point", "coordinates": [-122.341196, 47.615225]}, "bbox": [-122.341196, 47.615225, -122.341196, 47.615225]}, {"type": "Feature", "properties": {"Name": "BB's Teriyaki Grill", "Type": "Restaurants", "Link": "https://bbsteriyaki.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338223, 47.620236]}, "bbox": [-122.338223, 47.620236, -122.338223, 47.620236]}, {"type": "Feature", "properties": {"Name": "Chipotle", "Type": "Restaurants", "Link": "https://www.chipotle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338101, 47.620574]}, "bbox": [-122.338101, 47.620574, -122.338101, 47.620574]}, {"type": "Feature", "properties": {"Name": "Jack's BBQ", "Type": "Restaurants", "Link": "https://jacksbbq.com/"}, "geometry": {"type": "Point", "coordinates": [-122.33954, 47.620649]}, "bbox": [-122.33954, 47.620649, -122.33954, 47.620649]}, {"type": "Feature", "properties": {"Name": "Jimmy John's", "Type": "Restaurants", "Link": "https://www.jimmyjohns.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338137, 47.621862]}, "bbox": [-122.338137, 47.621862, -122.338137, 47.621862]}, {"type": "Feature", "properties": {"Name": "Portage Bay Cafe", "Type": "Restaurants", "Link": "https://www.portagebaycafe.com/"}, "geometry": {"type": "Point", "coordinates": [-122.337464, 47.621751]}, "bbox": [-122.337464, 47.621751, -122.337464, 47.621751]}, {"type": "Feature", "properties": {"Name": "re:public", "Type": "Restaurants", "Link": "https://republicseattle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338846, 47.622951]}, "bbox": [-122.338846, 47.622951, -122.338846, 47.622951]}, {"type": "Feature", "properties": {"Name": "Cactus South Lake Union", "Type": "Restaurants", "Link": "https://www.cactusrestaurants.com/"}, "geometry": {"type": "Point", "coordinates": [-122.336828, 47.621767]}, "bbox": [-122.336828, 47.621767, -122.336828, 47.621767]}, {"type": "Feature", "properties": {"Name": "La Palmera", "Type": "Restaurants", "Link": "https://www.lapalmerafmr.com/"}, "geometry": {"type": "Point", "coordinates": [-122.339399, 47.624304]}, "bbox": [-122.339399, 47.624304, -122.339399, 47.624304]}, {"type": "Feature", "properties": {"Name": "Plantiful SLU", "Type": "Restaurants", "Link": "https://www.plantiful.us/"}, "geometry": {"type": "Point", "coordinates": [-122.338137, 47.621678]}, "bbox": [-122.338137, 47.621678, -122.338137, 47.621678]}, {"type": "Feature", "properties": {"Name": "The Berliner Döner Kebab", "Type": "Restaurants", "Link": "https://the-berliner-dner-kebab.square.site/"}, "geometry": {"type": "Point", "coordinates": [-122.339417, 47.62275]}, "bbox": [-122.339417, 47.62275, -122.339417, 47.62275]}, {"type": "Feature", "properties": {"Name": "Momiji South Lake Union", "Type": "Restaurants", "Link": "https://www.momijislu.com/"}, "geometry": {"type": "Point", "coordinates": [-122.340507, 47.617681]}, "bbox": [-122.340507, 47.617681, -122.340507, 47.617681]}, {"type": "Feature", "properties": {"Name": "Sizzle & Crunch SLU", "Type": "Restaurants", "Link": "https://www.sizzleandcrunch.com/"}, "geometry": {"type": "Point", "coordinates": [-122.339152, 47.623913]}, "bbox": [-122.339152, 47.623913, -122.339152, 47.623913]}, {"type": "Feature", "properties": {"Name": "Supreme Dumplings", "Type": "Restaurants", "Link": "https://www.supreme-dumplings.com/"}, "geometry": {"type": "Point", "coordinates": [-122.339897, 47.617052]}, "bbox": [-122.339897, 47.617052, -122.339897, 47.617052]}, {"type": "Feature", "properties": {"Name": "Fulcrum", "Type": "Cafe", "Link": "https://www.fulcrumcoffee.com/"}, "geometry": {"type": "Point", "coordinates": [-122.342821, 47.61669]}, "bbox": [-122.342821, 47.61669, -122.342821, 47.61669]}, {"type": "Feature", "properties": {"Name": "203° Fahrenheit Coffee Co", "Type": "Cafe", "Link": "https://www.203degreesfahrenheit.coffee/"}, "geometry": {"type": "Point", "coordinates": [-122.336887, 47.625144]}, "bbox": [-122.336887, 47.625144, -122.336887, 47.625144]}, {"type": "Feature", "properties": {"Name": "Cafe Hagen Dexter", "Type": "Cafe", "Link": "https://www.cafehagen.com/"}, "geometry": {"type": "Point", "coordinates": [-122.342049, 47.626025]}, "bbox": [-122.342049, 47.626025, -122.342049, 47.626025]}, {"type": "Feature", "properties": {"Name": "Cafe Hagen", "Type": "Cafe", "Link": "https://www.cafehagen.com/"}, "geometry": {"type": "Point", "coordinates": [-122.331396, 47.62113]}, "bbox": [-122.331396, 47.62113, -122.331396, 47.62113]}, {"type": "Feature", "properties": {"Name": "Himalayan Coffee Seattle", "Type": "Cafe", "Link": "https://himalayancoffee.us/"}, "geometry": {"type": "Point", "coordinates": [-122.344467, 47.618287]}, "bbox": [-122.344467, 47.618287, -122.344467, 47.618287]}, {"type": "Feature", "properties": {"Name": "Monorail Espresso", "Type": "Cafe", "Link": "https://monorailespresso.com/"}, "geometry": {"type": "Point", "coordinates": [-122.338018, 47.617384]}, "bbox": [-122.338018, 47.617384, -122.338018, 47.617384]}, {"type": "Feature", "properties": {"Name": "Evoke Cafe Bar", "Type": "Cafe", "Link": "https://www.instagram.com/evokecafebar/"}, "geometry": {"type": "Point", "coordinates": [-122.339544, 47.620441]}, "bbox": [-122.339544, 47.620441, -122.339544, 47.620441]}, {"type": "Feature", "properties": {"Name": "Starbucks", "Type": "Cafe", "Link": "https://www.starbucks.com/"}, "geometry": {"type": "Point", "coordinates": [-122.336585, 47.624198]}, "bbox": [-122.336585, 47.624198, -122.336585, 47.624198]}, {"type": "Feature", "properties": {"Name": "Cafe An'Clair", "Type": "Cafe", "Link": "https://www.instagram.com/cafeanclair/"}, "geometry": {"type": "Point", "coordinates": [-122.340225, 47.621217]}, "bbox": [-122.340225, 47.621217, -122.340225, 47.621217]}, {"type": "Feature", "properties": {"Name": "Black Arrows Coffee", "Type": "Cafe", "Link": "https://www.blackarrowscoffee.com/"}, "geometry": {"type": "Point", "coordinates": [-122.34445, 47.617136]}, "bbox": [-122.34445, 47.617136, -122.34445, 47.617136]}, {"type": "Feature", "properties": {"Name": "Chaco Coffee & Tea", "Type": "Cafe", "Link": "https://chacoffeeandtea.com/"}, "geometry": {"type": "Point", "coordinates": [-122.348591, 47.618859]}, "bbox": [-122.348591, 47.618859, -122.348591, 47.618859]}, {"type": "Feature", "properties": {"Name": "The Seattle Grind", "Type": "Cafe", "Link": "http://theseattlegrind.com/"}, "geometry": {"type": "Point", "coordinates": [-122.346955, 47.622261]}, "bbox": [-122.346955, 47.622261, -122.346955, 47.622261]}, {"type": "Feature", "properties": {"Name": "Artisan Cafe", "Type": "Cafe", "Link": "http://www.artisancafeonvine.com/"}, "geometry": {"type": "Point", "coordinates": [-122.346268, 47.617653]}, "bbox": [-122.346268, 47.617653, -122.346268, 47.617653]}, {"type": "Feature", "properties": {"Name": "Caffe Umbria Olive Way", "Type": "Cafe", "Link": "https://caffeumbria.com/"}, "geometry": {"type": "Point", "coordinates": [-122.335706, 47.613608]}, "bbox": [-122.335706, 47.613608, -122.335706, 47.613608]}, {"type": "Feature", "properties": {"Name": "Anchorhead Coffee", "Type": "Cafe", "Link": "https://anchorheadcoffee.com/"}, "geometry": {"type": "Point", "coordinates": [-122.3346, 47.613395]}, "bbox": [-122.3346, 47.613395, -122.3346, 47.613395]}, {"type": "Feature", "properties": {"Name": "Lake Union Park", "Type": "Attractions", "Link": "https://www.seattle.gov/parks/parks/lake-union-park"}, "geometry": {"type": "Point", "coordinates": [-122.338214, 47.62606]}, "bbox": [-122.338214, 47.62606, -122.338214, 47.62606]}, {"type": "Feature", "properties": {"Name": "MOHAI", "Type": "Attractions", "Link": "https://mohai.org/"}, "geometry": {"type": "Point", "coordinates": [-122.336884, 47.626109]}, "bbox": [-122.336884, 47.626109, -122.336884, 47.626109]}, {"type": "Feature", "properties": {"Name": "Space Needle", "Type": "Attractions", "Link": "https://www.spaceneedle.com/"}, "geometry": {"type": "Point", "coordinates": [-122.349303, 47.620515]}, "bbox": [-122.349303, 47.620515, -122.349303, 47.620515]}, {"type": "Feature", "properties": {"Name": "Chihuly Garden and Glass", "Type": "Attractions", "Link": "https://www.chihulygardenandglass.com/"}, "geometry": {"type": "Point", "coordinates": [-122.350238, 47.620581]}, "bbox": [-122.350238, 47.620581, -122.350238, 47.620581]}, {"type": "Feature", "properties": {"Name": "Climate Pledge Arena", "Type": "Attractions", "Link": "https://www.climatepledgearena.com/"}, "geometry": {"type": "Point", "coordinates": [-122.353991, 47.621972]}, "bbox": [-122.353991, 47.621972, -122.353991, 47.621972]}, {"type": "Feature", "properties": {"Name": "MoPOP", "Type": "Attractions", "Link": "https://www.mopop.org/"}, "geometry": {"type": "Point", "coordinates": [-122.348244, 47.62142]}, "bbox": [-122.348244, 47.62142, -122.348244, 47.62142]}, {"type": "Feature", "properties": {"Name": "Pacific Science Center", "Type": "Attractions", "Link": "https://pacificsciencecenter.org/"}, "geometry": {"type": "Point", "coordinates": [-122.350805, 47.619384]}, "bbox": [-122.350805, 47.619384, -122.350805, 47.619384]}, {"type": "Feature", "properties": {"Name": "Memorial Stadium", "Type": "Attractions", "Link": "https://www.seattlecenter.com/memorial-stadium"}, "geometry": {"type": "Point", "coordinates": [-122.349916, 47.622764]}, "bbox": [-122.349916, 47.622764, -122.349916, 47.622764]}, {"type": "Feature", "properties": {"Name": "Seattle Center Exhibition Hall", "Type": "Attractions", "Link": "https://www.seattlecenter.com/connect/book-an-event/rentals/facilities/exhibition-hall"}, "geometry": {"type": "Point", "coordinates": [-122.351942, 47.624]}, "bbox": [-122.351942, 47.624, -122.351942, 47.624]}, {"type": "Feature", "properties": {"Name": "McCaw Hall", "Type": "Attractions", "Link": "https://www.mccawhall.com/"}, "geometry": {"type": "Point", "coordinates": [-122.350406, 47.623924]}, "bbox": [-122.350406, 47.623924, -122.350406, 47.623924]}, {"type": "Feature", "properties": {"Name": "Seattle Center Skate Plaza", "Type": "Attractions", "Link": "https://www.seattlecenter.com/"}, "geometry": {"type": "Point", "coordinates": [-122.345624, 47.621492]}, "bbox": [-122.345624, 47.621492, -122.345624, 47.621492]}, {"type": "Feature", "properties": {"Name": "Psychedelic Lens", "Type": "Attractions", "Link": "https://psychedeliclens.store/"}, "geometry": {"type": "Point", "coordinates": [-122.344166, 47.620665]}, "bbox": [-122.344166, 47.620665, -122.344166, 47.620665]}, {"type": "Feature", "properties": {"Name": "Capital One Cafe", "Type": "Attractions", "Link": "https://www.capitalone.com/local/seattle-southlakeunion/"}, "geometry": {"type": "Point", "coordinates": [-122.338863, 47.62225]}, "bbox": [-122.338863, 47.62225, -122.338863, 47.62225]}, {"type": "Feature", "properties": {"Name": "The Escape Game Seattle", "Type": "Attractions", "Link": "https://theescapegame.com/seattle/"}, "geometry": {"type": "Point", "coordinates": [-122.338553, 47.6166]}, "bbox": [-122.338553, 47.6166, -122.338553, 47.6166]}, {"type": "Feature", "properties": {"Name": "The Center for Wooden Boats", "Type": "Attractions", "Link": "https://www.cwb.org/"}, "geometry": {"type": "Point", "coordinates": [-122.336507, 47.62638]}, "bbox": [-122.336507, 47.62638, -122.336507, 47.62638]}, {"type": "Feature", "properties": {"Name": "Kenmore Air - Lake Union", "Type": "Attractions", "Link": "https://kenmoreair.com/"}, "geometry": {"type": "Point", "coordinates": [-122.339827, 47.628563]}, "bbox": [-122.339827, 47.628563, -122.339827, 47.628563]}, {"type": "Feature", "properties": {"Name": "Seattle Donut Boat", "Type": "Attractions", "Link": "https://seattledonutboat.com/"}, "geometry": {"type": "Point", "coordinates": [-122.331876, 47.629316]}, "bbox": [-122.331876, 47.629316, -122.331876, 47.629316]}]};
+const markerGeoJSON = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [-122.339173, 47.618168]}, "bbox": [-122.339173, 47.618168, -122.339173, 47.618168], "properties": {"label": "2201 Westlake Avenue - 2201 Westlake Avenue, Seattle, Washington 98121, United States"}}]};
+
+const ICONS = {
+  Hotels: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMiIgZGF0YS1uYW1lPSJMYXllciAyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMC4yNSAyMC4yNSI+CiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5jbHMtMSB7CiAgICAgICAgZmlsbDogbm9uZTsKICAgICAgICBzdHJva2U6ICNmZmY7CiAgICAgICAgc3Ryb2tlLW1pdGVybGltaXQ6IDEwOwogICAgICAgIHN0cm9rZS13aWR0aDogLjU3cHg7CiAgICAgIH0KCiAgICAgIC5jbHMtMiB7CiAgICAgICAgZmlsbDogIzVkYmI1NzsKICAgICAgfQogICAgPC9zdHlsZT4KICA8L2RlZnM+CiAgPGcgaWQ9Ik1hcF9pY29ucyIgZGF0YS1uYW1lPSJNYXAgaWNvbnMiPgogICAgPGc+CiAgICAgIDxjaXJjbGUgY2xhc3M9ImNscy0yIiBjeD0iMTAuMTIiIGN5PSIxMC4xMiIgcj0iMTAuMTIiLz4KICAgICAgPGc+CiAgICAgICAgPHBvbHlsaW5lIGNsYXNzPSJjbHMtMSIgcG9pbnRzPSI1LjY0IDE2Ljg2IDUuNjQgMy4zOSAxNC42MSAzLjM5IDE0LjYxIDE2Ljg2Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iNi45MiIgeTE9IjcuMjQiIHgyPSI2LjkyIiB5Mj0iOC41MiIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjguMiIgeTE9IjcuMjQiIHgyPSI4LjIiIHkyPSI4LjUyIi8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iOS40OCIgeTE9IjcuMjQiIHgyPSI5LjQ4IiB5Mj0iOC41MiIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjEwLjc3IiB5MT0iNy4yNCIgeDI9IjEwLjc3IiB5Mj0iOC41MiIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjEyLjA1IiB5MT0iNy4yNCIgeDI9IjEyLjA1IiB5Mj0iOC41MiIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjEzLjMzIiB5MT0iNy4yNCIgeDI9IjEzLjMzIiB5Mj0iOC41MiIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjYuOTIiIHkxPSI0LjY3IiB4Mj0iNi45MiIgeTI9IjUuOTYiLz4KICAgICAgICA8bGluZSBjbGFzcz0iY2xzLTEiIHgxPSI4LjIiIHkxPSI0LjY3IiB4Mj0iOC4yIiB5Mj0iNS45NiIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjkuNDgiIHkxPSI0LjY3IiB4Mj0iOS40OCIgeTI9IjUuOTYiLz4KICAgICAgICA8bGluZSBjbGFzcz0iY2xzLTEiIHgxPSIxMC43NyIgeTE9IjQuNjciIHgyPSIxMC43NyIgeTI9IjUuOTYiLz4KICAgICAgICA8bGluZSBjbGFzcz0iY2xzLTEiIHgxPSIxMi4wNSIgeTE9IjQuNjciIHgyPSIxMi4wNSIgeTI9IjUuOTYiLz4KICAgICAgICA8bGluZSBjbGFzcz0iY2xzLTEiIHgxPSIxMy4zMyIgeTE9IjQuNjciIHgyPSIxMy4zMyIgeTI9IjUuOTYiLz4KICAgICAgICA8bGluZSBjbGFzcz0iY2xzLTEiIHgxPSI2LjkyIiB5MT0iOS44IiB4Mj0iNi45MiIgeTI9IjExLjA5Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iOC4yIiB5MT0iOS44IiB4Mj0iOC4yIiB5Mj0iMTEuMDkiLz4KICAgICAgICA8bGluZSBjbGFzcz0iY2xzLTEiIHgxPSI5LjQ4IiB5MT0iOS44IiB4Mj0iOS40OCIgeTI9IjExLjA5Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iMTAuNzciIHkxPSI5LjgiIHgyPSIxMC43NyIgeTI9IjExLjA5Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iMTIuMDUiIHkxPSI5LjgiIHgyPSIxMi4wNSIgeTI9IjExLjA5Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iMTMuMzMiIHkxPSI5LjgiIHgyPSIxMy4zMyIgeTI9IjExLjA5Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iNi45MiIgeTE9IjEyLjM3IiB4Mj0iNi45MiIgeTI9IjEzLjY1Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iOC4yIiB5MT0iMTIuMzciIHgyPSI4LjIiIHkyPSIxMy42NSIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjkuNDgiIHkxPSIxMi4zNyIgeDI9IjkuNDgiIHkyPSIxMy42NSIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjEwLjc3IiB5MT0iMTIuMzciIHgyPSIxMC43NyIgeTI9IjEzLjY1Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iMTIuMDUiIHkxPSIxMi4zNyIgeDI9IjEyLjA1IiB5Mj0iMTMuNjUiLz4KICAgICAgICA8bGluZSBjbGFzcz0iY2xzLTEiIHgxPSIxMy4zMyIgeTE9IjEyLjM3IiB4Mj0iMTMuMzMiIHkyPSIxMy42NSIvPgogICAgICAgIDxwb2x5bGluZSBjbGFzcz0iY2xzLTEiIHBvaW50cz0iOC4yIDE2Ljg2IDguMiAxNC45MyAxMi4wNSAxNC45MyAxMi4wNSAxNi44NiIvPgogICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjEwLjEyIiB5MT0iMTQuOTMiIHgyPSIxMC4xMiIgeTI9IjE2Ljg2Ii8+CiAgICAgICAgPGxpbmUgY2xhc3M9ImNscy0xIiB4MT0iMy42NiIgeTE9IjE2Ljg2IiB4Mj0iMTYuNTkiIHkyPSIxNi44NiIvPgogICAgICA8L2c+CiAgICA8L2c+CiAgPC9nPgo8L3N2Zz4=',
+  Cafe: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMiIgZGF0YS1uYW1lPSJMYXllciAyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMC4yNSAyMC4yNSI+CiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5jbHMtMSwgLmNscy0yIHsKICAgICAgICBmaWxsOiAjZWQ4NDMwOwogICAgICB9CgogICAgICAuY2xzLTMgewogICAgICAgIHN0cm9rZS1taXRlcmxpbWl0OiAxMDsKICAgICAgICBzdHJva2Utd2lkdGg6IDEuMzVweDsKICAgICAgfQoKICAgICAgLmNscy0zLCAuY2xzLTIgewogICAgICAgIHN0cm9rZTogI2VkODQzMDsKICAgICAgfQoKICAgICAgLmNscy0zLCAuY2xzLTQgewogICAgICAgIGZpbGw6IG5vbmU7CiAgICAgIH0KCiAgICAgIC5jbHMtMiB7CiAgICAgICAgc3Ryb2tlLXdpZHRoOiAxLjM0cHg7CiAgICAgIH0KCiAgICAgIC5jbHMtMiwgLmNscy00IHsKICAgICAgICBzdHJva2UtbGluZWNhcDogcm91bmQ7CiAgICAgICAgc3Ryb2tlLWxpbmVqb2luOiByb3VuZDsKICAgICAgfQoKICAgICAgLmNscy00IHsKICAgICAgICBzdHJva2U6ICNmZmY7CiAgICAgICAgc3Ryb2tlLXdpZHRoOiAuNTRweDsKICAgICAgfQogICAgPC9zdHlsZT4KICA8L2RlZnM+CiAgPGcgaWQ9Ik1hcF9pY29ucyIgZGF0YS1uYW1lPSJNYXAgaWNvbnMiPgogICAgPGc+CiAgICAgIDxjaXJjbGUgY2xhc3M9ImNscy0xIiBjeD0iMTAuMTIiIGN5PSIxMC4xMiIgcj0iMTAuMTIiLz4KICAgICAgPGc+CiAgICAgICAgPHBhdGggY2xhc3M9ImNscy00IiBkPSJNMTMuMjQsMTAuMjFoMy4zMWMuMjgsMCwuNDkuMy40NC42Mi0uMjUsMS42LTEuNDMsMi44MS0yLjg1LDIuODFoLS45Ii8+CiAgICAgICAgPGc+CiAgICAgICAgICA8Zz4KICAgICAgICAgICAgPHBhdGggY2xhc3M9ImNscy00IiBkPSJNOC4zLDguMDVjLjE4LS4yMi4zNy0uNDQuMzctLjg4cy0uMTgtLjY2LS4zNy0uODhjLS4xOC0uMjItLjM3LS40NC0uMzctLjg4cy4xOC0uNjYuMzctLjg4Ii8+CiAgICAgICAgICAgIDxwYXRoIGNsYXNzPSJjbHMtNCIgZD0iTTEwLjA2LDguMDVjLjIyLS4yNy40NC0uNTQuNDQtMS4wOHMtLjIyLS44MS0uNDQtMS4wOGMtLjIyLS4yNy0uNDQtLjU0LS40NC0xLjA4cy4yMi0uODEuNDQtMS4wOCIvPgogICAgICAgICAgICA8cGF0aCBjbGFzcz0iY2xzLTQiIGQ9Ik0xMS44Miw4LjA0Yy4yNS0uMzIuNS0uNjQuNS0xLjI4cy0uMjUtLjk2LS41LTEuMjgtLjUtLjY0LS41LTEuMjguMjUtLjk2LjUtMS4yOCIvPgogICAgICAgICAgPC9nPgogICAgICAgICAgPHBhdGggY2xhc3M9ImNscy0yIiBkPSJNNS41LDkuMDN2MS42OGMwLDIuNTMsMi4wNSw0LjU4LDQuNTgsNC41OHM0LjU4LTIuMDUsNC41OC00LjU4di0xLjY4SDUuNVoiLz4KICAgICAgICAgIDxwYXRoIGNsYXNzPSJjbHMtNCIgZD0iTTEwLjA4LDE0LjExYzEuODcsMCwzLjQtMS41MiwzLjQtMy40di0uNSIvPgogICAgICAgICAgPHBhdGggY2xhc3M9ImNscy00IiBkPSJNNS41LDkuMDN2MS42OGMwLDIuNTMsMi4wNSw0LjU4LDQuNTgsNC41OHM0LjU4LTIuMDUsNC41OC00LjU4di0xLjY4SDUuNVoiLz4KICAgICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtNCIgeDE9IjEzLjg5IiB5MT0iMTYuNDYiIHgyPSI2LjI2IiB5Mj0iMTYuNDYiLz4KICAgICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMyIgeDE9IjQuMzEiIHkxPSIxNS4yNyIgeDI9IjE1Ljg0IiB5Mj0iMTUuMjciLz4KICAgICAgICAgIDxwb2x5bGluZSBjbGFzcz0iY2xzLTQiIHBvaW50cz0iNC4zMSAxNS4yOCA0LjMxIDE1LjI3IDE1Ljg0IDE1LjI3Ii8+CiAgICAgICAgPC9nPgogICAgICA8L2c+CiAgICA8L2c+CiAgPC9nPgo8L3N2Zz4=',
+  Restaurants: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMiIgZGF0YS1uYW1lPSJMYXllciAyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMC4yNSAyMC4yNSI+CiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5jbHMtMSB7CiAgICAgICAgZmlsbDogbm9uZTsKICAgICAgICBzdHJva2U6ICNmZmY7CiAgICAgICAgc3Ryb2tlLWxpbmVjYXA6IHJvdW5kOwogICAgICAgIHN0cm9rZS1saW5lam9pbjogcm91bmQ7CiAgICAgICAgc3Ryb2tlLXdpZHRoOiAuNTRweDsKICAgICAgfQoKICAgICAgLmNscy0yIHsKICAgICAgICBmaWxsOiAjZjVjMDFhOwogICAgICB9CiAgICA8L3N0eWxlPgogIDwvZGVmcz4KICA8ZyBpZD0iTWFwX2ljb25zIiBkYXRhLW5hbWU9Ik1hcCBpY29ucyI+CiAgICA8Zz4KICAgICAgPGNpcmNsZSBjbGFzcz0iY2xzLTIiIGN4PSIxMC4xMiIgY3k9IjEwLjEyIiByPSIxMC4xMiIvPgogICAgICA8Zz4KICAgICAgICA8Zz4KICAgICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjMuNTQiIHkxPSI1Ljc0IiB4Mj0iNi4yNyIgeTI9IjguNDciLz4KICAgICAgICAgIDxsaW5lIGNsYXNzPSJjbHMtMSIgeDE9IjQuMzUiIHkxPSI0Ljk0IiB4Mj0iNy4wNyIgeTI9IjcuNjYiLz4KICAgICAgICAgIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTIuNzQsNi41NWwzLjI5LDMuMjljLjQ5LjQ5LDEuMTkuNjEsMS44LjM5LDEuMzMsMS4zMyw2LjUzLDYuNTMsNi41Myw2LjUzLjI4LjI4LjczLjI4LDEuMDEsMCwuMjgtLjI4LjI4LS43MywwLTEuMDFsLTYuNTMtNi41M2MuMjItLjYxLjEtMS4zMS0uMzktMS44bC0zLjI5LTMuMjkiLz4KICAgICAgICA8L2c+CiAgICAgICAgPHBhdGggY2xhc3M9ImNscy0yIiBkPSJNMTAuNzgsMTEuOTZsLTQuODEsNC44MWMtLjI4LjI4LS43My4yOC0xLjAxLDBzLS4yOC0uNzMsMC0xLjAxbDExLjYyLTExLjYyYzEsMSwuODQsMi43OC0uMzUsMy45OGwtNC41NCw0LjU0Ii8+CiAgICAgICAgPHBhdGggY2xhc3M9ImNscy0xIiBkPSJNMTAuNzgsMTEuOTZsLTQuODEsNC44MWMtLjI4LjI4LS43My4yOC0xLjAxLDBzLS4yOC0uNzMsMC0xLjAxbDExLjYyLTExLjYyYzEsMSwuODQsMi43OC0uMzUsMy45OGwtNC4yNSw0LjI1Ii8+CiAgICAgIDwvZz4KICAgIDwvZz4KICA8L2c+Cjwvc3ZnPg==',
+  Attractions: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMiIgZGF0YS1uYW1lPSJMYXllciAyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMC4yNSAyMC4yNSI+CiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5jbHMtMSB7CiAgICAgICAgZmlsbDogbm9uZTsKICAgICAgICBzdHJva2U6ICNmZmY7CiAgICAgICAgc3Ryb2tlLW1pdGVybGltaXQ6IDEwOwogICAgICAgIHN0cm9rZS13aWR0aDogLjQ5cHg7CiAgICAgIH0KCiAgICAgIC5jbHMtMiB7CiAgICAgICAgZmlsbDogIzE2NWNhNzsKICAgICAgfQogICAgPC9zdHlsZT4KICA8L2RlZnM+CiAgPGcgaWQ9Ik1hcF9pY29ucyIgZGF0YS1uYW1lPSJNYXAgaWNvbnMiPgogICAgPGc+CiAgICAgIDxjaXJjbGUgY2xhc3M9ImNscy0yIiBjeD0iMTAuMTIiIGN5PSIxMC4xMiIgcj0iMTAuMTIiLz4KICAgICAgPGc+CiAgICAgICAgPGNpcmNsZSBjbGFzcz0iY2xzLTEiIGN4PSIxMC4xMiIgY3k9IjEwLjIiIHI9IjMuMTYiLz4KICAgICAgICA8Y2lyY2xlIGNsYXNzPSJjbHMtMSIgY3g9IjEwLjEyIiBjeT0iMTAuMiIgcj0iMS41OCIvPgogICAgICAgIDxwYXRoIGNsYXNzPSJjbHMtMSIgZD0iTTEyLjA0LDE0LjQ5bC0xLjkyLDIuNzEtMS45Mi0yLjcxaC0zLjczYy0uNSwwLS45LS40LS45LS45di02Ljc3YzAtLjUuNC0uOS45LS45aDMuMTZsLjU3LTEuNTFjLjA3LS4xOC4yMy0uMjkuNDItLjI5aDIuOThjLjE5LDAsLjM2LjEyLjQyLjI5bC41NywxLjUxaDMuMTZjLjUsMCwuOS40LjkuOXY2Ljc3YzAsLjUtLjQuOS0uOS45aC0zLjczWiIvPgogICAgICAgIDxjaXJjbGUgY2xhc3M9ImNscy0xIiBjeD0iNS4xNiIgY3k9IjcuNSIgcj0iLjY4Ii8+CiAgICAgIDwvZz4KICAgIDwvZz4KICA8L2c+Cjwvc3ZnPg==',
+  WestlakeIcon: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMiIgZGF0YS1uYW1lPSJMYXllciAyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzNS4xMSA1MS4yOCI+CiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5jbHMtMSB7CiAgICAgICAgZmlsbDogIzQ4OTdkMjsKICAgICAgfQoKICAgICAgLmNscy0yIHsKICAgICAgICBmaWxsOiAjNDg5NmQyOwogICAgICB9CgogICAgICAuY2xzLTMgewogICAgICAgIGZpbGw6ICNmZmY7CiAgICAgIH0KICAgIDwvc3R5bGU+CiAgPC9kZWZzPgogIDxnIGlkPSJNQVBfQkFTRSIgZGF0YS1uYW1lPSJNQVAgQkFTRSI+CiAgICA8Zz4KICAgICAgPGVsbGlwc2UgY2xhc3M9ImNscy0xIiBjeD0iMTcuNTYiIGN5PSI1MC4wNSIgcng9IjQuMzEiIHJ5PSIxLjIzIi8+CiAgICAgIDxnPgogICAgICAgIDxwYXRoIGNsYXNzPSJjbHMtMiIgZD0iTTM1LjExLDE3LjU2YzAsMi44Ny0uNjksNS41OS0xLjkyLDcuOThsLTE1LjY0LDI0LjU1UzIuMDgsMjUuODcsMS45MiwyNS41NGMtMS4yMi0yLjQtMS45Mi01LjExLTEuOTItNy45OEMwLDcuODYsNy44NiwwLDE3LjU2LDBzMTcuNTYsNy44NiwxNy41NiwxNy41NloiLz4KICAgICAgICA8cGF0aCBjbGFzcz0iY2xzLTMiIGQ9Ik0xNi44MiwxNS45MWMtMS42MiwxMC40MS0zLjc0LDEyLjY2LTYuOTIsMTIuNjYtMi44OSwwLTUuMy0yLjIyLTUuMy02Ljk4czEuNTktMTAuNTQsNC4yOC0xNS43NGg0LjgzYy0zLjU1LDUuODQtNC42NywxMi4zMi00LjY3LDE2LjE2LDAsLjU0LjAzLDIuNzYuOTIsMi43Ni43NiwwLDEuODEtMS42MiwzLjExLTkuNDYuNTctMy40OSwyLjUxLTQuNjcsNC40OC00LjY3LDIuMTksMCwzLjU1LDEuMTcsNC40Nyw0LjYzbDIuNDEsOS4wMVY1Ljg1aDQuNDR2MjIuMTZoLTcuNDNsLTIuOTItMTEuMTFjLS42LTIuMjgtLjczLTIuNTEtMS4wNS0yLjUxLS4yOCwwLS40OC4yMi0uNjcsMS41MloiLz4KICAgICAgPC9nPgogICAgPC9nPgogIDwvZz4KPC9zdmc+'
+};
+
+const TYPES = ['Hotels', 'Cafe', 'Restaurants', 'Attractions'];
+const DEFAULT_VIEW = { center: [-122.3465, 47.62025], zoom: 14.23 };
+
+function loadIcon(id, src, width, height) {
+  return new Promise((resolve, reject) => {
+    const img = new Image(width, height);
+    img.onload = () => {
+      if (!map.hasImage(id)) map.addImage(id, img, { pixelRatio: 2 });
+      resolve();
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+map.on('load', async () => {
+  // Load all custom icons (amenity badges at 96x96 source px, the taller
+  // Westlake pin at 132x192 to preserve its aspect ratio) before adding
+  // any layers that reference them.
+  await Promise.all([
+    loadIcon('Hotels', ICONS.Hotels, 96, 96),
+    loadIcon('Cafe', ICONS.Cafe, 96, 96),
+    loadIcon('Restaurants', ICONS.Restaurants, 96, 96),
+    loadIcon('Attractions', ICONS.Attractions, 96, 96),
+    loadIcon('WestlakeIcon', ICONS.WestlakeIcon, 132, 192)
+  ]);
+
+  map.addSource('amenities', { type: 'geojson', data: amenitiesGeoJSON });
+  map.addSource('marker', { type: 'geojson', data: markerGeoJSON });
+
+  // One symbol layer per amenity type so each can be toggled independently
+  TYPES.forEach(type => {
+    map.addLayer({
+      id: `poi-${type}`,
+      type: 'symbol',
+      source: 'amenities',
+      filter: ['==', ['get', 'Type'], type],
+      layout: {
+        'icon-image': ['get', 'Type'],
+        'icon-size': 0.6,
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'visibility': 'visible'
+      }
+    });
+  });
+
+  // Main property marker — bigger, always on top, no hover/click for now
+  map.addLayer({
+    id: 'westlake-marker',
+    type: 'symbol',
+    source: 'marker',
+    layout: {
+      'icon-image': 'WestlakeIcon',
+      'icon-size': 1,
+      'icon-anchor': 'bottom',
+      'icon-allow-overlap': true
+    }
+  });
+  // Belt-and-suspenders: explicitly move it to the very top of the layer
+  // stack (addLayer already does this by default with no second argument,
+  // but this makes the intent explicit and protects against anything added
+  // above it later, in code or in the Mapbox Studio style itself).
+  map.moveLayer('westlake-marker');
+
+  // --- Hover (name only) + click (name + website link) ------------------
+  // Two separate popups: hovering just previews the name, which avoids a
+  // common gotcha where a hover popup with a clickable link disappears the
+  // moment your cursor leaves the icon on the way to the link. Clicking
+  // opens a popup that stays put (with a close button) so the link is
+  // actually clickable — and works the same way on touch/mobile.
+  const hoverPopup = new mapboxgl.Popup({
+    closeButton: false,
+    closeOnClick: false,
+    offset: 14,
+    className: 'poi-popup'
+  });
+  const clickPopup = new mapboxgl.Popup({
+    closeButton: true,
+    closeOnClick: true,
+    offset: 14,
+    className: 'poi-popup'
+  });
+
+  TYPES.forEach(type => {
+    const layerId = `poi-${type}`;
+
+    map.on('mousemove', layerId, (e) => {
+      map.getCanvas().style.cursor = 'pointer';
+      const f = e.features[0];
+      hoverPopup
+        .setLngLat(f.geometry.coordinates)
+        .setHTML(`<p class="poi-popup-name">${f.properties.Name}</p>`)
+        .addTo(map);
+    });
+
+    map.on('mouseleave', layerId, () => {
+      map.getCanvas().style.cursor = '';
+      hoverPopup.remove();
+    });
+
+    map.on('click', layerId, (e) => {
+      hoverPopup.remove();
+      const f = e.features[0];
+      const name = f.properties.Name;
+      const link = f.properties.Link;
+      let html = `<p class="poi-popup-name">${name}</p>`;
+      if (link) {
+        html += `<a class="poi-popup-link" href="${link}" target="_blank" rel="noopener">Visit website →</a>`;
+      }
+      clickPopup.setLngLat(f.geometry.coordinates).setHTML(html).addTo(map);
+    });
+  });
+
+  // --- Category buttons: click isolates that type + opens a name list ----
+  // Clicking Hotels/Cafe/Restaurants/Attractions hides the other three,
+  // shows only that type, and lists every place in it on the side panel.
+  // Clicking a name in that list flies to it and opens its popup. "Show
+  // All" returns to the default view with every category visible again.
+  let activeType = null; // null = all categories visible (default state)
+
+  const listPanel = document.getElementById('poi-list-panel');
+  const listHeader = document.getElementById('poi-list-header');
+  const listTitle = document.getElementById('poi-list-title');
+  const listItems = document.getElementById('poi-list-items');
+  const markerCoords = markerGeoJSON.features[0].geometry.coordinates;
+
+  // Same colors as the buttons, with readable text on each (yellow needs a
+  // dark label rather than white to stay legible).
+  const TYPE_STYLE = {
+    Hotels:       { bg: '#5dbb57', fg: '#ffffff' },
+    Cafe:         { bg: '#ed8430', fg: '#ffffff' },
+    Restaurants:  { bg: '#f5c01a', fg: '#3a2c00' },
+    Attractions:  { bg: '#165ca7', fg: '#ffffff' }
+  };
+
+  // Keep the list panel positioned just under the button row, however tall
+  // that row currently is (it can wrap to two lines on a narrow embed).
+  function positionListPanel() {
+    const controlsRect = document.getElementById('map-controls').getBoundingClientRect();
+    listPanel.style.top = (controlsRect.bottom + 10) + 'px';
+  }
+  positionListPanel();
+  window.addEventListener('resize', positionListPanel);
+
+  function flyToFeature(f) {
+    // Fit both the selected place AND the 2201 Westlake marker in view,
+    // rather than just centering on the place and potentially pushing the
+    // property off-screen. Left padding accounts for the list panel.
+    const bounds = new mapboxgl.LngLatBounds();
+    bounds.extend(markerCoords);
+    bounds.extend(f.geometry.coordinates);
+    map.fitBounds(bounds, {
+      padding: { top: 70, bottom: 60, left: 260, right: 60 },
+      maxZoom: 17
+    });
+
+    const name = f.properties.Name;
+    const link = f.properties.Link;
+    let html = `<p class="poi-popup-name">${name}</p>`;
+    if (link) {
+      html += `<a class="poi-popup-link" href="${link}" target="_blank" rel="noopener">Visit website →</a>`;
+    }
+    hoverPopup.remove();
+    clickPopup.setLngLat(f.geometry.coordinates).setHTML(html).addTo(map);
+  }
+
+  function renderList(type) {
+    const features = amenitiesGeoJSON.features
+      .filter(f => f.properties.Type === type)
+      .slice()
+      .sort((a, b) => a.properties.Name.localeCompare(b.properties.Name));
+
+    const style = TYPE_STYLE[type];
+    listHeader.style.background = style.bg;
+    listHeader.style.color = style.fg;
+    listTitle.textContent = `${type} (${features.length})`;
+    listItems.innerHTML = '';
+
+    features.forEach(f => {
+      const li = document.createElement('li');
+      li.textContent = f.properties.Name;
+      li.addEventListener('click', () => {
+        listItems.querySelectorAll('li').forEach(el => el.classList.remove('selected'));
+        li.classList.add('selected');
+        flyToFeature(f);
+      });
+      listItems.appendChild(li);
+    });
+
+    listPanel.classList.add('open');
+  }
+
+  function isolateType(type) {
+    if (type === activeType) return;
+    activeType = type;
+    TYPES.forEach(t => {
+      const visible = t === type;
+      map.setLayoutProperty(`poi-${t}`, 'visibility', visible ? 'visible' : 'none');
+      document.getElementById(t).classList.toggle('active', visible);
+    });
+    renderList(type);
+  }
+
+  function showAllCategories() {
+    activeType = null;
+    TYPES.forEach(t => {
+      map.setLayoutProperty(`poi-${t}`, 'visibility', 'visible');
+      document.getElementById(t).classList.add('active');
+    });
+    listPanel.classList.remove('open');
+    clickPopup.remove();
+  }
+
+  function resetToDefault() {
+    showAllCategories();
+    map.flyTo({ center: DEFAULT_VIEW.center, zoom: DEFAULT_VIEW.zoom });
+  }
+
+  TYPES.forEach(type => {
+    document.getElementById(type).addEventListener('click', () => isolateType(type));
+  });
+  document.getElementById('showAll').addEventListener('click', resetToDefault);
+  document.getElementById('poi-list-close').addEventListener('click', () => {
+    listPanel.classList.remove('open');
+  });
+});
+</script>
+</body>
+</html>
