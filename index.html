@@ -230,6 +230,33 @@ function loadIcon(id, src, width, height) {
 }
 
 map.on('load', async () => {
+  // 🔽 REMOVE Mapbox's fancy/landmark 3D buildings
+  const layers = map.getStyle().layers;
+
+  for (const layer of layers) {
+    if (
+      layer.type === 'fill-extrusion' &&
+      layer.source === 'composite'
+    ) {
+      map.setLayoutProperty(layer.id, 'visibility', 'none');
+    }
+  }
+
+  // 🔽 ADD clean, uniform 3D buildings
+  map.addLayer({
+    id: 'custom-3d-buildings',
+    source: 'composite',
+    'source-layer': 'building',
+    filter: ['==', 'extrude', 'true'],
+    type: 'fill-extrusion',
+    minzoom: 14,
+    paint: {
+      'fill-extrusion-color': '#c9c9c7',
+      'fill-extrusion-height': ['get', 'height'],
+      'fill-extrusion-base': ['get', 'min_height'],
+      'fill-extrusion-opacity': 0.55
+    }
+  });
   // Load all custom icons (amenity badges at 96x96 source px, the taller
   // Westlake pin at 132x192 to preserve its aspect ratio) before adding
   // any layers that reference them.
