@@ -177,12 +177,6 @@ const map = new mapboxgl.Map({
   style: 'mapbox://styles/lhuffmancbre/cmqgxny5r001j01r37ioab3v7',
   center: [-122.3465, 47.62025],
   zoom: 13.6,
-
-  config: {
-    basemap: {
-      show3dObjects: false
-    }
-  }
 });
 
 
@@ -237,7 +231,39 @@ function loadIcon(id, src, width, height) {
 }
 
 map.on('load', async () => {
- 
+// 🔽 remove Mapbox "special" 3D landmark buildings
+const style = map.getStyle();
+
+style.layers.forEach(layer => {
+  const id = layer.id.toLowerCase();
+
+  if (
+    id.includes('3d') ||
+    id.includes('building') ||
+    id.includes('extrusion') ||
+    id.includes('landmark')
+  ) {
+    try {
+      map.setLayoutProperty(layer.id, 'visibility', 'none');
+    } catch (e) {}
+  }
+});
+
+  map.addLayer({
+  id: 'clean-3d-buildings',
+  source: 'composite',
+  'source-layer': 'building',
+  filter: ['==', 'extrude', 'true'],
+  type: 'fill-extrusion',
+  minzoom: 14,
+  paint: {
+    'fill-extrusion-color': '#d6d3cd',
+    'fill-extrusion-height': ['get', 'height'],
+    'fill-extrusion-base': ['get', 'min_height'],
+    'fill-extrusion-opacity': 0.6
+  }
+});
+  
   // Load all custom icons (amenity badges at 96x96 source px, the taller
   // Westlake pin at 132x192 to preserve its aspect ratio) before adding
   // any layers that reference them.
